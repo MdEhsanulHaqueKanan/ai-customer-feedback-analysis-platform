@@ -1,0 +1,19 @@
+# Python Virtual Environment
+venv/
+FeedbackAI/
+__pycache__/
+*.pyc
+
+# IDE / Editor specific
+.vscode/
+.idea/
+
+# Anaconda
+.conda/
+
+# ChromaDB persistent storage
+chroma_db/
+
+# Model files
+models/
+*.pt

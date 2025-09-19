@@ -1,0 +1,5 @@
+{
+  "name": "AI Customer Feedback Platform",
+  "description": "A sophisticated, AI-powered platform to analyze and visualize customer feedback from various sources. It features a data-centric dashboard, a RAG-powered AI assistant, and a media analysis section.",
+  "requestFramePermissions": []
+}
