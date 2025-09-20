@@ -7,15 +7,17 @@ RUN apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng
 # Set the working directory
 WORKDIR /code
 
-# Copy requirements and install Python dependencies first to leverage Docker caching
+# Copy requirements and install Python dependencies
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn
+# Add huggingface-hub[cli] to install the command-line tool
+RUN pip install --no-cache-dir -r requirements.txt gunicorn "huggingface-hub[cli]"
 
-# --- FINAL FIX: Pre-download and cache the Sentence Transformer model during the build ---
+# --- DEFINITIVE FIX: Reliably pre-cache the Sentence Transformer model ---
 # Set the environment variable to define the cache location
 ENV SENTENCE_TRANSFORMERS_HOME=/code/sentence-transformers-cache
-# Run a Python command to download the model into that specific cache directory
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# Use the official huggingface-cli to download the model into the cache.
+# This is the most robust method.
+RUN huggingface-cli download sentence-transformers/all-MiniLM-L6-v2 --cache-dir $SENTENCE_TRANSFORMERS_HOME
 
 # Now, copy the rest of the application code
 COPY backend/app ./app
