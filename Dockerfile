@@ -7,23 +7,22 @@ RUN apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng
 # Set the working directory
 WORKDIR /code
 
-# Copy requirements and install Python dependencies
+# Copy requirements first to leverage Docker layer caching
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn "huggingface-hub[cli]"
 
-# --- DEFINITIVE FIX FOR ALL PERMISSION ERRORS ---
-# Set the environment variable for the model cache
+# Pre-cache the Sentence Transformer model
 ENV SENTENCE_TRANSFORMERS_HOME=/code/sentence-transformers-cache
-# Pre-download the model into the cache directory during the build
 RUN huggingface-cli download sentence-transformers/all-MiniLM-L6-v2 --cache-dir $SENTENCE_TRANSFORMERS_HOME
-# Create AND set correct ownership for both the model cache and the persistent DB directory
-RUN mkdir -p /code/sentence-transformers-cache /code/backend/chroma_db && \
-    chown -R 1000:1000 /code/sentence-transformers-cache /code/backend/chroma_db
 
-# Now, copy the rest of the application code
-COPY backend/ ./backend
-COPY run.py .
-COPY config.py .
+# Now, copy the entire backend application code
+COPY backend/ ./
+
+# --- FINAL FIX for permissions ---
+# Create and set correct ownership for the persistent DB directory
+# The model cache is already handled by the downloader.
+RUN mkdir -p /code/chroma_db && \
+    chown -R 1000:1000 /code/chroma_db
 
 # Expose the application port
 EXPOSE 7860
