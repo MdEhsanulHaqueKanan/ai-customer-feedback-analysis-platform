@@ -13,9 +13,6 @@ from dotenv import load_dotenv
 from groq import Groq
 from PIL import Image
 
-# Manually specify the path to the Tesseract executable if needed
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
 # --- SERVICE INITIALIZATION (SINGLETON PATTERN) ---
 # load_dotenv()
 
