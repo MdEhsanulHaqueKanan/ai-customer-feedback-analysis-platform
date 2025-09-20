@@ -17,7 +17,7 @@ from PIL import Image
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # --- SERVICE INITIALIZATION (SINGLETON PATTERN) ---
-load_dotenv()
+# load_dotenv()
 
 class DataService:
     _instance = None
