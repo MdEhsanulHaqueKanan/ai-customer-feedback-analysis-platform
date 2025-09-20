@@ -1,3 +1,12 @@
+---
+title: AI Customer Feedback Analysis Platform
+emoji: 📊
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: true
+---
+
 # AI-Powered Customer Feedback & Product Insight Platform
 
 ![Python](https://img.shields.io/badge/Python-3.10-3776AB?style=for-the-badge&logo=python&logoColor=white)
