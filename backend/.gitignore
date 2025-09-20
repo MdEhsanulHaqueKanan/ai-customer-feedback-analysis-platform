@@ -13,7 +13,3 @@ __pycache__/
 
 # ChromaDB persistent storage
 chroma_db/
-
-# Model files
-models/
-*.pt
