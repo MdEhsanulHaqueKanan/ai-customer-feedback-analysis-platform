@@ -9,22 +9,21 @@ WORKDIR /code
 
 # Copy requirements and install Python dependencies
 COPY backend/requirements.txt .
-# Add huggingface-hub[cli] to install the command-line tool
 RUN pip install --no-cache-dir -r requirements.txt gunicorn "huggingface-hub[cli]"
 
-# --- DEFINITIVE FIX: Reliably pre-cache the Sentence Transformer model ---
-# Set the environment variable to define the cache location
+# --- DEFINITIVE FIX FOR ALL PERMISSION ERRORS ---
+# Set the environment variable for the model cache
 ENV SENTENCE_TRANSFORMERS_HOME=/code/sentence-transformers-cache
-# Use the official huggingface-cli to download the model into the cache.
-# This is the most robust method.
+# Pre-download the model into the cache directory during the build
 RUN huggingface-cli download sentence-transformers/all-MiniLM-L6-v2 --cache-dir $SENTENCE_TRANSFORMERS_HOME
+# Create AND set correct ownership for both the model cache and the persistent DB directory
+RUN mkdir -p /code/sentence-transformers-cache /code/backend/chroma_db && \
+    chown -R 1000:1000 /code/sentence-transformers-cache /code/backend/chroma_db
 
 # Now, copy the rest of the application code
-COPY backend/app ./app
-COPY backend/data ./data
-COPY backend/models ./models
-COPY backend/run.py .
-COPY backend/config.py .
+COPY backend/ ./backend
+COPY run.py .
+COPY config.py .
 
 # Expose the application port
 EXPOSE 7860
