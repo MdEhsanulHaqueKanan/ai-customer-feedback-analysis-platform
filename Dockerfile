@@ -22,5 +22,9 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 # Expose the port that Hugging Face Spaces uses
 EXPOSE 7860
 
+# Set an environment variable to tell the sentence-transformers library
+# to use a local directory inside our app for its cache.
+ENV SENTENCE_TRANSFORMERS_HOME=/code/sentence-transformers-cache
+
 # The command to run the application using the Gunicorn production server
 CMD ["gunicorn", "--bind", "0.0.0.0:7860", "--workers", "1", "--threads", "4", "run:app"]
