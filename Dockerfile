@@ -17,7 +17,7 @@ COPY backend/run.py .
 COPY backend/config.py .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 # Expose the port that Hugging Face Spaces uses
 EXPOSE 7860
