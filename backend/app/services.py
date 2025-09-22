@@ -132,7 +132,7 @@ def extract_feedback_chunks_with_llm(full_text: str):
     try:
         chat_completion = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-8b-instant",
             temperature=0.0,
             response_format={"type": "json_object"},
         )
