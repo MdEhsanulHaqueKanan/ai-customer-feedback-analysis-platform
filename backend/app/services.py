@@ -11,10 +11,10 @@ from sentence_transformers import SentenceTransformer
 import chromadb
 from dotenv import load_dotenv
 from groq import Groq
-from PIL import Image
+from PIL import Image # This is needed for OCR
 
 # --- SERVICE INITIALIZATION (SINGLETON PATTERN) ---
-# load_dotenv()
+load_dotenv()
 
 class DataService:
     _instance = None
@@ -78,7 +78,6 @@ class DataService:
         return dashboard_data, 200
         
     def add_document_chunk(self, chunk: dict, filename: str, timestamp: pd.Timestamp):
-        """Appends a single structured feedback chunk with a specific timestamp."""
         text = chunk.get('feedback_text', '')
         sentiment = chunk.get('sentiment', 'neutral').lower()
         star_rating_map = {'positive': 5, 'neutral': 3, 'negative': 1}
@@ -110,7 +109,6 @@ print("All AI services initialized successfully.")
 # --- REGULAR SERVICE FUNCTIONS ---
 
 def extract_feedback_chunks_with_llm(full_text: str):
-    # ... (This function remains the same) ...
     print("Sending document to LLM for intelligent chunking...")
     prompt = f"""
     You are an expert data extraction AI. Your task is to read the following document and identify every individual, distinct piece of customer feedback.
@@ -145,10 +143,8 @@ def extract_feedback_chunks_with_llm(full_text: str):
             for key, value in parsed_json.items():
                 if isinstance(value, list):
                     return value
-        
         if isinstance(parsed_json, list):
             return parsed_json
-            
         print("Warning: LLM did not return a list in the expected format.")
         return []
     except Exception as e:
@@ -156,7 +152,6 @@ def extract_feedback_chunks_with_llm(full_text: str):
         return []
 
 def process_uploaded_document(file_storage):
-    """V2 with nanosecond precision: Extracts text, chunks it, and ingests each chunk with a guaranteed unique timestamp."""
     try:
         filename = file_storage.filename
         file_bytes = file_storage.read()
@@ -193,10 +188,8 @@ def process_uploaded_document(file_storage):
 
         base_timestamp = pd.Timestamp.now()
         for i, chunk in enumerate(feedback_chunks):
-            # Create a unique, ascending timestamp for each chunk
             unique_timestamp = base_timestamp + pd.Timedelta(nanoseconds=i + 1)
             data_service.add_document_chunk(chunk, filename, unique_timestamp)
-            
             chunk_text = chunk.get("feedback_text", "")
             if chunk_text:
                 doc_id = f"chunk_{filename}_{unique_timestamp.isoformat()}_{hash(chunk_text)}"
@@ -215,7 +208,6 @@ def process_uploaded_document(file_storage):
         return {"error": "An error occurred while processing the document."}, 500
 
 def ingest_reviews_for_rag():
-    # ... (This function remains the same) ...
     global review_collection
     if review_collection.count() > 0:
         print("Review collection is already populated. Skipping ingestion.")
@@ -232,14 +224,18 @@ def ingest_reviews_for_rag():
             batch_ids = ids[i:i + batch_size]
             batch_meta = batch_metadatas[i:i + batch_size]
             batch_embeddings = embedding_model.encode(batch_documents, show_progress_bar=False)
-            review_collection.add(embeddings=batch_embeddings.tolist(), documents=batch_documents, metadatas=batch_meta, ids=batch_ids)
+            review_collection.add(
+                embeddings=batch_embeddings.tolist(),
+                documents=batch_documents,
+                metadatas=batch_meta,
+                ids=batch_ids
+            )
             print(f"Ingested RAG batch {i // batch_size + 1}...")
         print(f"Successfully ingested {review_collection.count()} reviews into ChromaDB.")
     except Exception as e:
         print(f"Error during RAG ingestion: {e}")
 
 def query_reviews(question: str, num_results: int = 5, source_filter: str = "all"):
-    # ... (This function remains the same) ...
     try:
         query_params = {"query_texts": [question], "n_results": num_results}
         if source_filter and source_filter != "all":
