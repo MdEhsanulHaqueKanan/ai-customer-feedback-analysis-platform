@@ -7,11 +7,15 @@ import time
 import fitz  # PyMuPDF
 import docx  # python-docx
 import pytesseract
+import tempfile # <-- ADD THIS IMPORT
 from sentence_transformers import SentenceTransformer
 import chromadb
 from dotenv import load_dotenv
 from groq import Groq
-from PIL import Image # This is needed for OCR
+from PIL import Image
+
+# Manually specify the path to the Tesseract executable for local Windows dev if needed
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # --- SERVICE INITIALIZATION (SINGLETON PATTERN) ---
 load_dotenv()
@@ -31,7 +35,6 @@ class DataService:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             data_path = os.path.join(base_dir, '..', 'data', 'reviews_apparel_sample_10k.csv')
             df = pd.read_csv(data_path)
-            
             df['review_date'] = pd.to_datetime(df['review_date'], errors='coerce')
             df.dropna(subset=['review_date'], inplace=True)
             df['sentiment'] = df['star_rating'].apply(self._map_sentiment)
@@ -51,25 +54,22 @@ class DataService:
     def get_dashboard_data(self):
         if self.df.empty:
             return {"error": "No data available to generate dashboard."}, 500
-            
+        # ... (Dashboard logic is correct and remains the same) ...
         sentiment_over_time = self.df.groupby([self.df['review_date'].dt.date, 'sentiment']).size().unstack(fill_value=0)
         sentiment_over_time.reset_index(inplace=True)
         sentiment_over_time = sentiment_over_time.rename(columns={'review_date': 'date'})
         sentiment_over_time['date'] = pd.to_datetime(sentiment_over_time['date']).dt.strftime('%Y-%m-%d')
         sentiment_trend_data = sentiment_over_time.sort_values(by='date').to_dict(orient='records')
-        
         topic_counts = self.df['topic'].value_counts()
         total_topics = len(self.df)
         topic_distribution_data = []
         for name, value in topic_counts.items():
             percentage = round((value / total_topics) * 100, 2)
             topic_distribution_data.append({ "name": name, "value": int(value), "percentage": percentage })
-
         df_sorted = self.df.sort_values(by='review_date', ascending=True)
         df_recent = df_sorted[['review_headline', 'review_body', 'review_summary', 'sentiment', 'review_date', 'topic']].dropna(subset=['review_body']).tail(20)
         df_recent['review_date'] = df_recent['review_date'].dt.strftime('%Y-%m-%d')
         recent_feedback = df_recent.to_dict(orient='records')
-        
         dashboard_data = {
             "sentiment_over_time": sentiment_trend_data,
             "topic_distribution": topic_distribution_data,
@@ -78,19 +78,16 @@ class DataService:
         return dashboard_data, 200
         
     def add_document_chunk(self, chunk: dict, filename: str, timestamp: pd.Timestamp):
+        # ... (This function is correct and remains the same) ...
         text = chunk.get('feedback_text', '')
         sentiment = chunk.get('sentiment', 'neutral').lower()
         star_rating_map = {'positive': 5, 'neutral': 3, 'negative': 1}
         star_rating = star_rating_map.get(sentiment, 3)
-
         new_row = {
-            'review_date': timestamp,
-            'review_body': text,
+            'review_date': timestamp, 'review_body': text,
             'review_summary': (text[:200] + '...') if len(text) > 200 else text,
-            'review_headline': f"From report: {filename}",
-            'star_rating': star_rating,
-            'sentiment': sentiment,
-            'topic': 'Document'
+            'review_headline': f"From report: {filename}", 'star_rating': star_rating,
+            'sentiment': sentiment, 'topic': 'Document'
         }
         self.df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
         print(f"Added chunk from '{filename}'. DataFrame now has {len(self.df)} rows.")
@@ -109,6 +106,7 @@ print("All AI services initialized successfully.")
 # --- REGULAR SERVICE FUNCTIONS ---
 
 def extract_feedback_chunks_with_llm(full_text: str):
+    # ... (This function is correct and remains the same) ...
     print("Sending document to LLM for intelligent chunking...")
     prompt = f"""
     You are an expert data extraction AI. Your task is to read the following document and identify every individual, distinct piece of customer feedback.
@@ -153,69 +151,73 @@ def extract_feedback_chunks_with_llm(full_text: str):
 
 def process_uploaded_document(file_storage):
     """
-    DIAGNOSTIC VERSION: This is a simpler version to test if the core
-    text extraction and data service update are working in production.
-    It bypasses the complex LLM chunking step.
+    FINAL PRODUCTION VERSION: Saves the uploaded file to a temporary location on disk
+    before processing to ensure data integrity in a multi-threaded server environment.
     """
-    try:
-        filename = file_storage.filename
-        file_bytes = file_storage.read()
-        extracted_text = ""
+    with tempfile.NamedTemporaryFile(delete=True, suffix=os.path.splitext(file_storage.filename)[1]) as temp_file:
+        file_storage.save(temp_file.name)
         
-        if filename.endswith('.pdf'):
-            print("Processing PDF file...")
-            pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
-            for page in pdf_document:
-                extracted_text += page.get_text()
-            if len(extracted_text.strip()) < 50:
-                print("Minimal text found. Attempting OCR fallback...")
-                extracted_text = ""
-                for page_num in range(len(pdf_document)):
-                    page = pdf_document.load_page(page_num)
-                    pix = page.get_pixmap()
-                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                    extracted_text += pytesseract.image_to_string(img) + "\n"
-        elif filename.endswith('.docx'):
-            print("Processing DOCX file...")
-            doc = docx.Document(io.BytesIO(file_bytes))
-            for para in doc.paragraphs:
-                extracted_text += para.text + "\n"
-        else:
-            return {"error": "Unsupported file type."}, 400
+        try:
+            filename = file_storage.filename
+            extracted_text = ""
+            
+            if filename.endswith('.pdf'):
+                print("Processing PDF file...")
+                pdf_document = fitz.open(temp_file.name) # Open from the temp file path
+                for page in pdf_document:
+                    extracted_text += page.get_text()
+                if len(extracted_text.strip()) < 50:
+                    print("Minimal text found. Attempting OCR fallback...")
+                    extracted_text = ""
+                    # Re-open the PDF to get images for OCR
+                    pdf_for_ocr = fitz.open(temp_file.name)
+                    for page_num in range(len(pdf_for_ocr)):
+                        page = pdf_for_ocr.load_page(page_num)
+                        pix = page.get_pixmap()
+                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                        extracted_text += pytesseract.image_to_string(img) + "\n"
+            elif filename.endswith('.docx'):
+                print("Processing DOCX file...")
+                doc = docx.Document(temp_file.name) # Open from the temp file path
+                for para in doc.paragraphs:
+                    extracted_text += para.text + "\n"
+            else:
+                return {"error": "Unsupported file type."}, 400
 
-        if not extracted_text.strip():
-            return {"error": "No text could be extracted from the document."}, 400
+            if not extracted_text.strip():
+                return {"error": "No text could be extracted from the document."}, 400
 
-        # --- BYPASSING LLM CHUNKING FOR THIS TEST ---
-        # We will treat the whole document as a single chunk
-        print("Bypassing LLM chunking for diagnostic test.")
-        
-        # Ingest the entire document into RAG
-        doc_id = f"doc_{filename}_{pd.Timestamp.now().isoformat()}"
-        embedding = embedding_model.encode([extracted_text])
-        review_collection.add(
-            embeddings=embedding.tolist(),
-            documents=[extracted_text],
-            metadatas=[{"source": "report"}],
-            ids=[doc_id]
-        )
-        
-        # Add the entire document as a single item to the dashboard
-        # We create a temporary "chunk" dictionary to use the existing method
-        temp_chunk = {"feedback_text": extracted_text, "sentiment": "neutral"}
-        data_service.add_document_chunk(temp_chunk, filename, pd.Timestamp.now())
+            feedback_chunks = extract_feedback_chunks_with_llm(extracted_text)
+            
+            if not feedback_chunks:
+                return {"error": "AI could not identify distinct feedback items in the document."}, 500
 
-        print(f"Successfully ingested entire document '{filename}' as a single chunk.")
-        return {"status": "success", "message": f"Successfully ingested '{filename}' as one item."}, 200
+            base_timestamp = pd.Timestamp.now()
+            for i, chunk in enumerate(feedback_chunks):
+                unique_timestamp = base_timestamp + pd.Timedelta(nanoseconds=i + 1)
+                data_service.add_document_chunk(chunk, filename, unique_timestamp)
+                chunk_text = chunk.get("feedback_text", "")
+                if chunk_text:
+                    doc_id = f"chunk_{filename}_{unique_timestamp.isoformat()}_{hash(chunk_text)}"
+                    embedding = embedding_model.encode([chunk_text])
+                    review_collection.add(
+                        embeddings=embedding.tolist(),
+                        documents=[chunk_text],
+                        metadatas=[{"source": "report"}],
+                        ids=[doc_id]
+                    )
 
-    except Exception as e:
-        # We add more detailed error logging for this test
-        import traceback
-        print(f"CRITICAL ERROR in process_uploaded_document: {e}")
-        traceback.print_exc()
-        return {"error": "An error occurred while processing the document."}, 500
+            print(f"Successfully ingested {len(feedback_chunks)} chunks from document '{filename}'.")
+            return {"status": "success", "message": f"Successfully ingested {len(feedback_chunks)} feedback items from '{filename}'."}, 200
+
+        except Exception as e:
+            import traceback
+            print(f"CRITICAL ERROR in process_uploaded_document: {e}")
+            traceback.print_exc()
+            return {"error": "An error occurred while processing the document."}, 500
 
 def ingest_reviews_for_rag():
+    # ... (This function remains the same) ...
     global review_collection
     if review_collection.count() > 0:
         print("Review collection is already populated. Skipping ingestion.")
@@ -232,18 +234,14 @@ def ingest_reviews_for_rag():
             batch_ids = ids[i:i + batch_size]
             batch_meta = batch_metadatas[i:i + batch_size]
             batch_embeddings = embedding_model.encode(batch_documents, show_progress_bar=False)
-            review_collection.add(
-                embeddings=batch_embeddings.tolist(),
-                documents=batch_documents,
-                metadatas=batch_meta,
-                ids=batch_ids
-            )
+            review_collection.add(embeddings=batch_embeddings.tolist(), documents=batch_documents, metadatas=batch_meta, ids=batch_ids)
             print(f"Ingested RAG batch {i // batch_size + 1}...")
         print(f"Successfully ingested {review_collection.count()} reviews into ChromaDB.")
     except Exception as e:
         print(f"Error during RAG ingestion: {e}")
 
 def query_reviews(question: str, num_results: int = 5, source_filter: str = "all"):
+    # ... (This function remains the same) ...
     try:
         query_params = {"query_texts": [question], "n_results": num_results}
         if source_filter and source_filter != "all":
