@@ -152,6 +152,11 @@ def extract_feedback_chunks_with_llm(full_text: str):
         return []
 
 def process_uploaded_document(file_storage):
+    """
+    DIAGNOSTIC VERSION: This is a simpler version to test if the core
+    text extraction and data service update are working in production.
+    It bypasses the complex LLM chunking step.
+    """
     try:
         filename = file_storage.filename
         file_bytes = file_storage.read()
@@ -181,30 +186,33 @@ def process_uploaded_document(file_storage):
         if not extracted_text.strip():
             return {"error": "No text could be extracted from the document."}, 400
 
-        feedback_chunks = extract_feedback_chunks_with_llm(extracted_text)
+        # --- BYPASSING LLM CHUNKING FOR THIS TEST ---
+        # We will treat the whole document as a single chunk
+        print("Bypassing LLM chunking for diagnostic test.")
         
-        if not feedback_chunks:
-            return {"error": "AI could not identify distinct feedback items in the document."}, 500
+        # Ingest the entire document into RAG
+        doc_id = f"doc_{filename}_{pd.Timestamp.now().isoformat()}"
+        embedding = embedding_model.encode([extracted_text])
+        review_collection.add(
+            embeddings=embedding.tolist(),
+            documents=[extracted_text],
+            metadatas=[{"source": "report"}],
+            ids=[doc_id]
+        )
+        
+        # Add the entire document as a single item to the dashboard
+        # We create a temporary "chunk" dictionary to use the existing method
+        temp_chunk = {"feedback_text": extracted_text, "sentiment": "neutral"}
+        data_service.add_document_chunk(temp_chunk, filename, pd.Timestamp.now())
 
-        base_timestamp = pd.Timestamp.now()
-        for i, chunk in enumerate(feedback_chunks):
-            unique_timestamp = base_timestamp + pd.Timedelta(nanoseconds=i + 1)
-            data_service.add_document_chunk(chunk, filename, unique_timestamp)
-            chunk_text = chunk.get("feedback_text", "")
-            if chunk_text:
-                doc_id = f"chunk_{filename}_{unique_timestamp.isoformat()}_{hash(chunk_text)}"
-                embedding = embedding_model.encode([chunk_text])
-                review_collection.add(
-                    embeddings=embedding.tolist(),
-                    documents=[chunk_text],
-                    metadatas=[{"source": "report"}],
-                    ids=[doc_id]
-                )
+        print(f"Successfully ingested entire document '{filename}' as a single chunk.")
+        return {"status": "success", "message": f"Successfully ingested '{filename}' as one item."}, 200
 
-        print(f"Successfully ingested {len(feedback_chunks)} chunks from document '{filename}'.")
-        return {"status": "success", "message": f"Successfully ingested {len(feedback_chunks)} feedback items from '{filename}'."}, 200
     except Exception as e:
-        print(f"Error processing document: {e}")
+        # We add more detailed error logging for this test
+        import traceback
+        print(f"CRITICAL ERROR in process_uploaded_document: {e}")
+        traceback.print_exc()
         return {"error": "An error occurred while processing the document."}, 500
 
 def ingest_reviews_for_rag():
