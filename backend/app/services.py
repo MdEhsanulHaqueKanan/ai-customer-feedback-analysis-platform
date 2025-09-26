@@ -217,26 +217,49 @@ def process_uploaded_document(file_storage):
             return {"error": "An error occurred while processing the document."}, 500
 
 def ingest_reviews_for_rag():
-    # ... (This function remains the same) ...
+    """
+    Ingests data into the RAG knowledge base.
+    In PRODUCTION mode, it ingests a smaller sample to respect storage limits.
+    """
     global review_collection
     if review_collection.count() > 0:
         print("Review collection is already populated. Skipping ingestion.")
         return
+
     try:
         print("Starting RAG ingestion...")
+        # --- FINAL FIX: Production-aware data sampling ---
+        # Check for an environment variable to determine the run mode.
+        IS_PRODUCTION = os.environ.get('ENVIRONMENT') == 'production'
+        
         df = data_service.df.dropna(subset=['review_body'])
+        
+        if IS_PRODUCTION:
+            print("Production mode detected. Ingesting a smaller sample of 1000 reviews.")
+            df = df.head(1000)
+        else:
+            print("Development mode. Ingesting all available reviews.")
+
         documents = df['review_body'].tolist()
         ids = [f"review_{i}" for i in range(len(documents))]
         batch_metadatas = [{"source": "apparel_review"}] * len(documents)
+        
         batch_size = 500
         for i in range(0, len(documents), batch_size):
+            # ... (the rest of the function is the same) ...
             batch_documents = documents[i:i + batch_size]
             batch_ids = ids[i:i + batch_size]
             batch_meta = batch_metadatas[i:i + batch_size]
             batch_embeddings = embedding_model.encode(batch_documents, show_progress_bar=False)
-            review_collection.add(embeddings=batch_embeddings.tolist(), documents=batch_documents, metadatas=batch_meta, ids=batch_ids)
+            review_collection.add(
+                embeddings=batch_embeddings.tolist(),
+                documents=batch_documents,
+                metadatas=batch_meta,
+                ids=batch_ids
+            )
             print(f"Ingested RAG batch {i // batch_size + 1}...")
         print(f"Successfully ingested {review_collection.count()} reviews into ChromaDB.")
+        
     except Exception as e:
         print(f"Error during RAG ingestion: {e}")
 
