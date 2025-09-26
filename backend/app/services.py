@@ -143,19 +143,20 @@ def extract_feedback_chunks_with_llm(full_text: str):
 def process_uploaded_document(file_storage):
     """
     FINAL PRODUCTION VERSION: Manually handles a temporary file to ensure
-    data is fully written to disk before processing, avoiding race conditions.
+    data is fully written to disk before processing, avoiding race conditions in production.
     """
-    temp_path = None
-    try:
-        # Step 1: Create a temporary file path with the correct suffix
-        fd, temp_path = tempfile.mkstemp(suffix=os.path.splitext(file_storage.filename)[1])
-        os.close(fd)
+    # Create a temporary file path with the correct suffix (e.g., '.docx')
+    suffix = os.path.splitext(file_storage.filename)[1]
+    fd, temp_path = tempfile.mkstemp(suffix=suffix)
+    os.close(fd) # Close the file descriptor, as we'll reopen it with save()
 
-        # Step 2: Explicitly save the uploaded file to this path
+    try:
+        # --- DEFINITIVE FIX ---
+        # Explicitly save the uploaded file's contents to the temporary path we created.
         file_storage.save(temp_path)
         print(f"File saved temporarily to: {temp_path}")
 
-        # Now that the file is guaranteed to be fully written, proceed with processing
+        # Now that the file is guaranteed to be fully written and saved, proceed.
         filename = file_storage.filename
         extracted_text = ""
         
@@ -185,6 +186,7 @@ def process_uploaded_document(file_storage):
         if not extracted_text.strip():
             return {"error": "No text could be extracted from the document."}, 400
 
+        # --- LLM CHUNKING AND INGESTION (REMAINS THE SAME) ---
         feedback_chunks = extract_feedback_chunks_with_llm(extracted_text)
         
         if not feedback_chunks:
@@ -215,6 +217,7 @@ def process_uploaded_document(file_storage):
         return {"error": "An error occurred while processing the document."}, 500
     
     finally:
+        # --- CRITICAL: This ensures the temporary file is always deleted ---
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
             print(f"Cleaned up temporary file: {temp_path}")
