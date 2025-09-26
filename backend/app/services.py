@@ -7,7 +7,7 @@ import time
 import fitz  # PyMuPDF
 import docx  # python-docx
 import pytesseract
-import tempfile # <-- ADD THIS IMPORT
+import tempfile 
 from sentence_transformers import SentenceTransformer
 import chromadb
 from dotenv import load_dotenv
@@ -151,70 +151,85 @@ def extract_feedback_chunks_with_llm(full_text: str):
 
 def process_uploaded_document(file_storage):
     """
-    FINAL PRODUCTION VERSION: Saves the uploaded file to a temporary location on disk
-    before processing to ensure data integrity in a multi-threaded server environment.
+    FINAL PRODUCTION VERSION: Manually handles a temporary file to ensure
+    data is fully written to disk before processing, avoiding race conditions.
     """
-    with tempfile.NamedTemporaryFile(delete=True, suffix=os.path.splitext(file_storage.filename)[1]) as temp_file:
-        file_storage.save(temp_file.name)
+    temp_path = None
+    try:
+        # Step 1: Create a temporary file path
+        fd, temp_path = tempfile.mkstemp(suffix=os.path.splitext(file_storage.filename)[1])
+        os.close(fd) # Close the file descriptor
+
+        # Step 2: Explicitly save the uploaded file to this path
+        file_storage.save(temp_path)
+        print(f"File saved temporarily to: {temp_path}")
+
+        # Now that the file is guaranteed to be fully written, proceed with processing
+        filename = file_storage.filename
+        extracted_text = ""
         
-        try:
-            filename = file_storage.filename
-            extracted_text = ""
-            
-            if filename.endswith('.pdf'):
-                print("Processing PDF file...")
-                pdf_document = fitz.open(temp_file.name) # Open from the temp file path
-                for page in pdf_document:
-                    extracted_text += page.get_text()
-                if len(extracted_text.strip()) < 50:
-                    print("Minimal text found. Attempting OCR fallback...")
-                    extracted_text = ""
-                    # Re-open the PDF to get images for OCR
-                    pdf_for_ocr = fitz.open(temp_file.name)
-                    for page_num in range(len(pdf_for_ocr)):
-                        page = pdf_for_ocr.load_page(page_num)
-                        pix = page.get_pixmap()
-                        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                        extracted_text += pytesseract.image_to_string(img) + "\n"
-            elif filename.endswith('.docx'):
-                print("Processing DOCX file...")
-                doc = docx.Document(temp_file.name) # Open from the temp file path
-                for para in doc.paragraphs:
-                    extracted_text += para.text + "\n"
-            else:
-                return {"error": "Unsupported file type."}, 400
+        if filename.endswith('.pdf'):
+            # ... (PDF/OCR logic is the same, but opens from temp_path)
+            print("Processing PDF file...")
+            pdf_document = fitz.open(temp_path)
+            for page in pdf_document:
+                extracted_text += page.get_text()
+            if len(extracted_text.strip()) < 50:
+                print("Minimal text found. Attempting OCR fallback...")
+                extracted_text = ""
+                pdf_for_ocr = fitz.open(temp_path)
+                for page_num in range(len(pdf_for_ocr)):
+                    page = pdf_for_ocr.load_page(page_num)
+                    pix = page.get_pixmap()
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    extracted_text += pytesseract.image_to_string(img) + "\n"
+        
+        elif filename.endswith('.docx'):
+            print("Processing DOCX file...")
+            doc = docx.Document(temp_path) # Open from the temp file path
+            for para in doc.paragraphs:
+                extracted_text += para.text + "\n"
+        else:
+            return {"error": "Unsupported file type."}, 400
 
-            if not extracted_text.strip():
-                return {"error": "No text could be extracted from the document."}, 400
+        if not extracted_text.strip():
+            return {"error": "No text could be extracted from the document."}, 400
 
-            feedback_chunks = extract_feedback_chunks_with_llm(extracted_text)
-            
-            if not feedback_chunks:
-                return {"error": "AI could not identify distinct feedback items in the document."}, 500
+        # --- LLM CHUNKING AND INGESTION ---
+        feedback_chunks = extract_feedback_chunks_with_llm(extracted_text)
+        
+        if not feedback_chunks:
+            return {"error": "AI could not identify distinct feedback items in the document."}, 500
 
-            base_timestamp = pd.Timestamp.now()
-            for i, chunk in enumerate(feedback_chunks):
-                unique_timestamp = base_timestamp + pd.Timedelta(nanoseconds=i + 1)
-                data_service.add_document_chunk(chunk, filename, unique_timestamp)
-                chunk_text = chunk.get("feedback_text", "")
-                if chunk_text:
-                    doc_id = f"chunk_{filename}_{unique_timestamp.isoformat()}_{hash(chunk_text)}"
-                    embedding = embedding_model.encode([chunk_text])
-                    review_collection.add(
-                        embeddings=embedding.tolist(),
-                        documents=[chunk_text],
-                        metadatas=[{"source": "report"}],
-                        ids=[doc_id]
-                    )
+        base_timestamp = pd.Timestamp.now()
+        for i, chunk in enumerate(feedback_chunks):
+            unique_timestamp = base_timestamp + pd.Timedelta(nanoseconds=i + 1)
+            data_service.add_document_chunk(chunk, filename, unique_timestamp)
+            chunk_text = chunk.get("feedback_text", "")
+            if chunk_text:
+                doc_id = f"chunk_{filename}_{unique_timestamp.isoformat()}_{hash(chunk_text)}"
+                embedding = embedding_model.encode([chunk_text])
+                review_collection.add(
+                    embeddings=embedding.tolist(),
+                    documents=[chunk_text],
+                    metadatas=[{"source": "report"}],
+                    ids=[doc_id]
+                )
 
-            print(f"Successfully ingested {len(feedback_chunks)} chunks from document '{filename}'.")
-            return {"status": "success", "message": f"Successfully ingested {len(feedback_chunks)} feedback items from '{filename}'."}, 200
+        print(f"Successfully ingested {len(feedback_chunks)} chunks from document '{filename}'.")
+        return {"status": "success", "message": f"Successfully ingested {len(feedback_chunks)} feedback items from '{filename}'."}, 200
 
-        except Exception as e:
-            import traceback
-            print(f"CRITICAL ERROR in process_uploaded_document: {e}")
-            traceback.print_exc()
-            return {"error": "An error occurred while processing the document."}, 500
+    except Exception as e:
+        import traceback
+        print(f"CRITICAL ERROR in process_uploaded_document: {e}")
+        traceback.print_exc()
+        return {"error": "An error occurred while processing the document."}, 500
+    
+    finally:
+        # --- CRITICAL: Clean up the temporary file ---
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+            print(f"Cleaned up temporary file: {temp_path}")
 
 def ingest_reviews_for_rag():
     """
