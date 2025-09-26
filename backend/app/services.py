@@ -14,9 +14,6 @@ from dotenv import load_dotenv
 from groq import Groq
 from PIL import Image
 
-# For local dev, you might need this. For production, it should be removed/commented.
-# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
 # --- SERVICE INITIALIZATION (SINGLETON PATTERN) ---
 load_dotenv()
 
