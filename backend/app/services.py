@@ -142,21 +142,26 @@ def extract_feedback_chunks_with_llm(full_text: str):
 
 def process_uploaded_document(file_storage):
     """
-    FINAL PRODUCTION VERSION: Manually handles a temporary file to ensure
-    data is fully written to disk before processing, avoiding race conditions in production.
+    FINAL PRODUCTION VERSION: Manually reads and writes the file to a temporary
+    location to ensure 100% data integrity before processing.
     """
-    # Create a temporary file path with the correct suffix (e.g., '.docx')
-    suffix = os.path.splitext(file_storage.filename)[1]
-    fd, temp_path = tempfile.mkstemp(suffix=suffix)
-    os.close(fd) # Close the file descriptor, as we'll reopen it with save()
-
+    temp_path = None
     try:
-        # --- DEFINITIVE FIX ---
-        # Explicitly save the uploaded file's contents to the temporary path we created.
-        file_storage.save(temp_path)
-        print(f"File saved temporarily to: {temp_path}")
+        # Step 1: Create a temporary file path with the correct suffix (e.g., '.docx')
+        suffix = os.path.splitext(file_storage.filename)[1]
+        fd, temp_path = tempfile.mkstemp(suffix=suffix)
+        os.close(fd) # Close the initial descriptor
 
-        # Now that the file is guaranteed to be fully written and saved, proceed.
+        # --- DEFINITIVE FIX ---
+        # Step 2: Manually read the bytes from the in-memory upload
+        # and write them to our temporary file on disk.
+        with open(temp_path, 'wb') as temp_f:
+            # file_storage.stream.read() gets the raw bytes of the file
+            temp_f.write(file_storage.stream.read())
+        print(f"File manually written to temporary path: {temp_path}")
+        # --- END OF FIX ---
+
+        # Now that the file is guaranteed to be fully written, proceed.
         filename = file_storage.filename
         extracted_text = ""
         
@@ -168,6 +173,7 @@ def process_uploaded_document(file_storage):
             if len(extracted_text.strip()) < 50:
                 print("Minimal text found. Attempting OCR fallback...")
                 extracted_text = ""
+                # Re-open is good practice to avoid stream position issues
                 pdf_for_ocr = fitz.open(temp_path)
                 for page_num in range(len(pdf_for_ocr)):
                     page = pdf_for_ocr.load_page(page_num)
@@ -217,7 +223,7 @@ def process_uploaded_document(file_storage):
         return {"error": "An error occurred while processing the document."}, 500
     
     finally:
-        # --- CRITICAL: This ensures the temporary file is always deleted ---
+        # --- CRITICAL: This ensures the temporary file is always deleted, even if an error occurs ---
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
             print(f"Cleaned up temporary file: {temp_path}")
